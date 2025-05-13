@@ -482,7 +482,7 @@ function treatmentEle( eleArray ){
 	}
 	let PreEle =  eleArray[0];
 	for ( let i = 1; i < eleArray.length; i++ ){
-		if ( eleArray[i] < 10 || eleArray[i] === 83886.08 ){ eleArray[i] = PreEle; }
+		if ( eleArray[i] < -10 || eleArray[i] === 83886.08 ){ eleArray[i] = PreEle; }
 		PreEle = eleArray[i];
 	}
 	return eleArray;
