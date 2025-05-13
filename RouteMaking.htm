@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>RouteMaking</title>
+	<script> let lat = 35.909130, lon =138.728869; // 地図表示位置初期値 </script>
+	<style>
+	body{
+	  margin-top: 10px;
+	  margin-right: 20px;
+	  margin-left: 20px;
+	}
+	.iconS {
+	  width: 10px; height: 10px;
+	  border-radius: 50% 50% 50% 50%;
+	  background-color: #ff00ff;
+	  position: absolute;
+	}
+	.iconG {
+	  width: 10px; height: 10px;
+	  border-radius: 50% 50% 50% 50%;
+	  background-color: #000080;
+	position: absolute;
+	}
+	#menue {
+	  list-style: none;
+	  overflow: hidden;
+	  width: 690px;
+	  padding: 0px 0px 0px 0px;
+	}
+	#menue li {
+	  width: 125px;
+	  font-size: 14px;
+	  text-align: center;
+	  background-color: #000000;
+	  border: 1px solid #ffffff;
+	  float: left;
+	}
+	#menue li a {
+	  text-decoration: none;
+	  color: #fffafa;
+	  font-weight: bold;
+	  margin: 0 0 0 auto;
+	}
+	</style>
+	<link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" integrity="sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A==" crossorigin=""/>
+	<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js" integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA==" crossorigin=""></script>
+</head>
+<body>
+	<div style="display: flex; justify-content: space-between; align-items: center; width: 640px;">
+ 		<span style="text-align: left;"><b>ルート作成 ver1.0</b></span>
+		<div style="text-align: right;">
+			<label for="mapCenterEntry">地図を移動: </label>
+ 			<input type="text" id="mapCenterEntry" size="30" value="">
+			<input type="button" onclick="mapJunp()" value="移動">
+		</div>
+	</div>
+
+	<div id="mapWin" style="width:640px;height:390px"></div>
+
+	<div id="menue">
+		<li id ="menue1"><a onclick="clrTrail()" style="cursor: pointer;">trail表示クリア</a></li>
+		<li id ="menue2"><a onclick="clrSelect()" style="cursor: pointer;">ルート選択クリア</a></li>
+		<li id ="menue3"><a onclick="selectFix()" style="cursor: pointer;">ルート確定</a></li>
+		<li id ="menue4"><a onclick="clrOutpuImage()" style="cursor: pointer;">確定ルート取消</a></li>
+		<li id ="menue5"><a onClick="saveFile()"  style="cursor: pointer;">ルート保存</a></li>
+	</div>
+	<span id="message"></span>
+	<br>
+
+<script>
+let zoom = 15;
+let mymap;
+let vecTile = {}; // タイルJsonTxt { 'zoom/tilX/tileY': JsonTxt }
+let trailDat = {}; //  各vecタイルのtrail(latlon配列) { 'zoom/tilX/tileY':[ trail-1, trail-2,,,,,,] } trail-nは[ [lat, lon],,,,,] 
+let LLayerTrail = {}; // 各vecタイルのtrailライン leafletレイヤー { 'zoom/tilX/tileY': [ [LLine, Sicon, Gicon],,,, ] }
+let selectTrail = []; // 選択trail [{ trailName: 'zoom/tilX/tileY', latlon: [[lat,lon],,,,] }, {…},,, ]
+let LLayerSelect = []; // 選択trail leafletレイヤー
+let outTrailDat = []; // 出力trailのデータ [[lat, lon],,,,] 標高取得後  [[lat,l on, ele],,,,]
+let LLayerOutImage = []; // 出力イメージ leafletレイヤー
+let eleTile = {}; //png標高タイル  { 'zoom/tilX/tileY': Uint8ClampedArray,,,,, }
+let outEleDat = []; // 出力trail標高データ
+let recFreeTrai = []; // FreeTraiのlatlng配列
+let rightClickFlag = false; // 右クリック有無のフラグ
+let ignoreClickFlag = false; // フリートレイル直後のclick無視フラグ
+let recording = false;
+let preLatlon = null;
+let freeTrailLine = null; // FreeTrai表示用ポリライン
+let freeTrailNum = 0;
+const PointInterval = 10; // FreeTrai記録間隔（）
+
+const WrtMsg = (str) =>{ document.getElementById("message").innerHTML = str}; 
+const inputForcas = document.getElementById("mapCenterEntry");
+inputForcas.addEventListener( "click", function(){ this.select(); }, false );
+document.getElementById("mapWin").style.cursor = "crosshair";
+document.getElementById("mapCenterEntry").value = lat +","+ lon;
+
+DrwMap();
+zoom = mymap.getZoom();
+
+// 地図表示
+function DrwMap(){
+	mymap = L.map('mapWin').setView([lat, lon], zoom );
+	// 地理院地図
+	const gsi = L.tileLayer( "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
+			{attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>',maxZoom: 18} );
+	// 地理院地図 全国最新写真
+	const pht = L.tileLayer( "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg",
+			{attribution: '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院(GRUS画像© Axelspace)</a>',maxZoom: 18} );
+	// オープンストリートマップ
+	const osm = L.tileLayer('http://tile.openstreetmap.jp/{z}/{x}/{y}.png',
+			{attribution: "<a href='http://osm.org/copyright' target='_blank'>OpenStreetMap</a> contributors" } );
+	//baseMapsオブジェクトに地図タイル名を設定しコントロール内にプロパティ名を表示
+	const baseMaps = { "地理院地図" : gsi, "全国最新写真": pht, "OpenStreetMap"  : osm };
+	L.control.layers( baseMaps ).addTo(mymap); //コントロール表示
+	gsi.addTo(mymap);
+	Sicon = L.divIcon({ className: "iconS", html: "", iconSize: [6, 6], iconAnchor: [3, 3] });
+	Gicon = L.divIcon({ className: "iconG", html: "", iconSize: [6, 6], iconAnchor: [3, 3] });
+	mymap.on('click', mapLeftClick);
+	mymap.on('contextmenu', mapRightClick);
+	mymap.on('mousedown', startFreeTrail);
+	mymap.on('mousemove', addFreeTrail);
+	mymap.on('mouseup', stopFreeTrail);
+}
+
+// freeTrail開始
+function startFreeTrail(e){
+	if ( !rightClickFlag ) return;
+	mymap.dragging.disable();
+	recording = true;
+	recFreeTrai = [[e.latlng.lat, e.latlng.lng]];
+	preLatlon = e.latlng;
+	if (!freeTrailLine){ // ポリラインがなければ作成
+		freeTrailLine = L.polyline(recFreeTrai, { color: 'red' }).addTo(mymap);
+	}else{
+		freeTrailLine.setLatLngs(recFreeTrai); // 既存ポリラインを初期化
+	}
+}
+
+// freeTrail追加
+function addFreeTrail(e){
+	if ( !recording ) return;
+	const currentLatLng = e.latlng;
+	if ( !preLatlon || mymap.distance(preLatlon, currentLatLng) >= PointInterval ){
+		recFreeTrai.push( [e.latlng.lat, e.latlng.lng] );
+		preLatlon = currentLatLng;
+		if (freeTrailLine) { freeTrailLine.setLatLngs(recFreeTrai); } // ポリライン更新
+	}
+}
+
+// freeTrail終了
+function stopFreeTrail(){
+	if (!recording) return;
+	mymap.dragging.enable();
+	if ( recFreeTrai.length > 2 ){
+		let trailName = "FreeTrail" + freeTrailNum;
+		freeTrailNum++;
+		selectTrail.push({ trailName, latlon:recFreeTrai });
+		trailName =  "S-" + trailName;
+		LLayerSelect.push( drawTrailLine( trailName, recFreeTrai, "#ffec00" ) ); // yellow系
+	}
+	mymap.removeLayer( freeTrailLine );
+	rightClickFlag = false;
+	preLatlon = null;
+	freeTrailLine = null;
+	recording = false;
+	ignoreClickFlag = true; // 次のclickを無視するフラグを立てる
+}
+
+// trailクリック (trail選択)
+function trailkClick(e){
+	let lineTitle = e.target.options.title;
+	if ( lineTitle === "outImage" ) return;
+	if ( lineTitle.split('-')[0] === "S" ){
+		celectCancel( lineTitle );
+	}else{
+		let tileName = lineTitle.split('-')[0];
+		let trailNum =  Number( lineTitle.split('-')[1] );
+		let latlon = trailDat[tileName][trailNum];
+		selectTrail.push( { trailName:lineTitle, latlon } );
+		let trkName =  "S-" + lineTitle;
+		LLayerSelect.push( drawTrailLine( trkName, latlon, "#ffec00" ) ); // yellow系
+	}
+}
+
+// 地図左クリック：クリック位置でタイルチェック、ダウンロード、trail描画
+function mapLeftClick(e){
+	if (ignoreClickFlag){ // クリック無視フラグ処理
+		ignoreClickFlag = false;
+		return;
+	}
+	if (recording) return;
+	lat = e.latlng.lat;	lon = e.latlng.lng;	zoom = 16;
+	let tileInfo = latlon2Tile( lat, lon, zoom );
+	let tileName = `${ zoom }/${ tileInfo.tx }/${ tileInfo.ty }`;
+	if ( vecTile.hasOwnProperty(tileName) === false ){
+		// クリック位置を含むタイルがvecTileにあるかチェック、無ければダウンロード
+		getVecTile( tileName );
+	}else if ( LLayerTrail.hasOwnProperty(tileName) === false ){
+		// タイルは有るがtrail表示がなければ再描画（選択ラインの消去/再描画(ライン上書き対策)、出力イメージ）
+		json2Line( tileName );
+		if ( selectTrail ){
+			eraseSelectLine();
+			drwSelectLine();
+		}
+		if ( outTrailDat.length != 0 ){ makeOutputLine(); }
+	}
+}
+
+//地図右クリックでフリートレイルを有効にしてtrailを消去
+function mapRightClick(e){
+	lat = e.latlng.lat;	lon = e.latlng.lng;	let zoom = 16;
+	rightClickFlag = true;	
+	return; // trailは消去しない
+	let tileInfo = latlon2Tile( lat, lon, zoom );
+	let tileName = `${ zoom }/${ tileInfo.tx }/${ tileInfo.ty }`;
+	if ( !LLayerTrail.hasOwnProperty(tileName) ) return;
+	for ( let i = 0; i < LLayerTrail[tileName].length; i++ ){
+		for ( let j = 0; j < 3; j++ ) { mymap.removeLayer( LLayerTrail[tileName][i][j] ); }
+	}
+	delete LLayerTrail[tileName];
+}
+
+// 選択トラックのキャンセル
+function celectCancel(lineName){
+	let remv = 0;
+	for ( let i = 0; i <selectTrail.length; i++ ){
+		if ( "S-" + selectTrail[i].trailName === lineName ){ remv = i; }
+	}
+	selectTrail.length = remv; // 選択trailから最終trailまで削除
+	//selectTrail.splice( remv, 1 ); // 選択trailのみ削除
+	eraseSelectLine();
+	drwSelectLine();
+}
+
+// 選択 trail ラインの描画
+function drwSelectLine(){
+	for ( let i = 0; i < selectTrail.length; i++ ){
+		let tileName = selectTrail[i].trailName;
+		let latlon = selectTrail[i].latlon;
+		tileName =  "S-" + tileName;
+		LLayerSelect.push( drawTrailLine( tileName, latlon, "#ffec00" ) ); // yellow系
+	}
+}
+
+// 選択 trail ラインの消去
+function eraseSelectLine(){
+	for ( let i = 0; i < LLayerSelect.length; i++ ){
+		for ( let j = 0; j < 3; j++ ) { mymap.removeLayer( LLayerSelect[i][j] ); }
+	}
+	LLayerSelect = [];
+}
+
+// 緯度経度,ズームレベルからタイル、ピクセル座標を求める 返値：{ tx:タイルX, ty:タイルY, px:ピクセルX, py:ピクセルY };
+function latlon2Tile(latVal, lonVal, zoomVal){ 
+	const L = 85.05112878;
+	let lat = parseFloat(latVal);
+	let lon = parseFloat(lonVal);
+	let zoom = parseInt(zoomVal);
+	// ピクセル座標
+	let pX = parseInt(Math.pow(2, zoom + 7) * (lon / 180 + 1));
+	let pY = parseInt((Math.pow(2, zoom + 7) / Math.PI) * ((-1 * Math.atanh(Math.sin((Math.PI / 180) * lat))) + Math.atanh(Math.sin((Math.PI / 180) * L))));
+	// タイル座標
+	let tX = parseInt(pX / 256);
+	let tY = parseInt(pY / 256);
+	// タイル内ピクセル座標
+	let tpX = pX % tX;
+	let tpY = pY % tY;
+	return { tx:tX, ty:tY, px:tpX, py:tpY };
+}
+
+// ベクトルタイル取得
+async function getVecTile(tileNameTxt){
+	let url = `https://cyberjapandata.gsi.go.jp/xyz/experimental_rdcl/${tileNameTxt}.geojson`;
+	let reqs = new XMLHttpRequest();
+	reqs.ontimeout = function () { WrtMsg3( "タイムアウト"); };
+	reqs.onreadystatechange = function(){
+		if (reqs.readyState == 4){
+			if (reqs.status == 200){
+				vecTile[tileNameTxt] = reqs.responseText;
+				json2Line( tileNameTxt );
+			}else{
+				console.log( "error " + reqs.status );
+				if ( reqs.status === 404 ){
+					WrtMsg('<span style="color:mediumblue;"><b>地理院サーバーにデータがありません</b></span>');
+					setTimeout( () => {  WrtMsg("");}, 1000 );
+				}
+				if ( reqs.status === 429 ){
+					WrtMsg('<span style="color:red;"><b>少し間をおいて地図をクリックしてください</b></span>');
+					setTimeout( () => {  WrtMsg("");}, 2000 );
+				}
+			}
+		}
+	};
+	reqs.open("GET", url, true);
+	reqs.send(null); 
+}
+
+// JSONの各featureからlatlonを取り出して描画
+function json2Line( tileNameTxt ){
+	let compo = JSON.parse( vecTile[tileNameTxt] );
+	let LLineArr = [], latlonArrTmp = [];
+	for ( let i = 0; i < compo.features.length; i++ ){
+		let skipFlg = 0;
+		if ( compo.features[i].properties.rdCtg === "高速自動車国道等" ) skipFlg = 1;
+		if ( compo.features[i].properties.state === "トンネル" ) skipFlg = 1;
+		if ( skipFlg === 0 ){
+			let lonlat = compo.features[i].geometry.coordinates;
+			let latlon = [];
+			for ( let j = 0; j < lonlat.length; j++ ){ latlon.push( [ lonlat[j][1], lonlat[j][0] ] ); } // 地理院geoJSONのlat, lonは順序がLeaflrtと逆
+			latlonArrTmp.push( latlon );
+		}
+	}
+	trailDat[tileNameTxt] = latlonArrTmp;
+	for ( let i = 0; i < latlonArrTmp.length; i++ ){
+		LLineArr.push( drawTrailLine( tileNameTxt + "-" + i, latlonArrTmp[i], 'cornflowerblue' ) );
+	}
+	LLayerTrail[tileNameTxt] = LLineArr;
+}
+
+// トレイルラインと始終点の描画
+function drawTrailLine( trkName, trkLatLon, tColor ){
+	let trailLine;
+	trailLine = L.polyline(trkLatLon, {title:trkName, color: tColor, weight: 5, bubblingMouseEvents: false }).on('click', trailkClick).addTo(mymap);
+	let Spoint = trkLatLon[0], Gpoint = trkLatLon[ trkLatLon.length -1 ];
+	let Smark = L.marker(Spoint, {title:trkName+"S", icon:Sicon }).on('click', trailkClick).addTo(mymap);
+	let Gmark = L.marker(Gpoint, {title:trkName+"G", icon:Gicon }).addTo(mymap).on('click', trailkClick).addTo(mymap);
+	return [ trailLine, Smark, Gmark ];
+}
+
+// 選択確定後の処理
+function selectFix(){
+	let outDatTmp = [];
+	if ( selectTrail.length < 1 ) return;
+	if ( LLayerOutImage.length != 0 ) clrOutpuImage();
+	if ( selectTrail.length > 1 ){
+		for ( let i = 0; i < selectTrail.length; i++ ){
+			outDatTmp.push( selectTrail[i].latlon );
+		}
+		let selTrack_Org = outDatTmp.slice();
+		// 最初のtrailの方向を判断
+		let prBgn = outDatTmp[0][0];
+		let prEnd = outDatTmp[0][ outDatTmp[0].length -1 ];
+		let nxBgn = outDatTmp[1][0];
+		let nxEnd = outDatTmp[1][ outDatTmp[1].length -1 ];
+		let B2B = hubeny( prBgn[0], prBgn[1], nxBgn[0], nxBgn[1] );
+		let B2E = hubeny( prBgn[0], prBgn[1], nxEnd[0], nxEnd[1] );
+		let E2B = hubeny( prEnd[0], prEnd[1], nxBgn[0], nxBgn[1] );
+		let E2E = hubeny( prEnd[0], prEnd[1], nxEnd[0], nxEnd[1] );
+		let distArr = [ B2B, B2E, E2B, E2E ];
+		let minDist = Math.min( ...distArr );
+		let INDEXmin = distArr.indexOf( minDist );
+		if ( INDEXmin < 2 ){ outDatTmp[0].reverse(); } 
+		// 次のtrailからは始点終点の距離だけで方向を判断
+		for (let i = 0; i < outDatTmp.length - 1; i++ ){
+			prEnd = outDatTmp[i][ outDatTmp[i].length -1 ];
+			nxBgn = outDatTmp[ i+1 ][0];
+			nxEnd = outDatTmp[ i+1 ][ outDatTmp[ i+1 ].length -1 ];
+			E2B = hubeny( prEnd[0], prEnd[1], nxBgn[0], nxBgn[1] );
+			E2E = hubeny( prEnd[0], prEnd[1], nxEnd[0], nxEnd[1] );
+			if ( E2E < E2B ){ outDatTmp[ i+1 ].reverse(); }
+		}
+	}else{
+		if (!selectTrail[0].trailName.includes("FreeTrail") ){
+			return;
+		}else{
+			outDatTmp.push( selectTrail[0].latlon );
+		}
+	}
+	for ( let i = 0; i < outDatTmp.length; i++ ){ outTrailDat = outTrailDat.concat( outDatTmp[i] ); }
+	clrTrail();
+	eraseSelectLine();
+	drwSelectLine();
+	makeOutputLine();
+}
+
+// 出力ルート描画
+function makeOutputLine(){
+	if ( LLayerOutImage.length != 0 ){
+		for ( let i = 0; i < 3; i++ ) { mymap.removeLayer( LLayerOutImage[i] ); }
+		LLayerOutImage = [];
+	}
+	LLayerOutImage = drawTrailLine( "outImage", outTrailDat, "#ea5532" ); // red
+}
+
+// trailラインの消去
+function clrTrail(){
+ 	for ( let key in LLayerTrail ){
+		for ( let i = 0; i < LLayerTrail[key].length; i++ ){
+			for ( let j = 0; j < 3; j++ ) { mymap.removeLayer( LLayerTrail[key][i][j] ); }
+		}
+	}
+	LLayerTrail = {};
+}
+
+// ルート選択クリア
+function clrSelect(){
+	eraseSelectLine();
+	selectTrail = [];
+}
+
+// 出力ルート消去、選択トラック再描画
+function clrOutpuImage(){
+	if ( LLayerOutImage.length === 0 ) return;
+	if ( message.hasChildNodes() ){ for ( let i= message.childNodes.length-1; i>=0; i-- ){ message.removeChild(message.childNodes[i]); } }
+	for ( let i = 0; i < 3; i++ ) { mymap.removeLayer( LLayerOutImage[i] ); }
+	LLayerOutImage = [];
+	outTrailDat = [];
+}
+
+// 2つの緯度、経度から２点間の距離を求める
+function hubeny(ido1, keido1, ido2, keido2){ 
+	let P = (ido1 + ido2) / 2 * Math.PI / 180;
+	let dP = (ido1 - ido2) * Math.PI / 180;
+	let dR = (keido1 - keido2) * Math.PI / 180;
+	let M = 6334834 / Math.sqrt(Math.pow((1 - 0.006674 * Math.sin(P) * Math.sin(P)),3));
+	let N = 6377397 / Math.sqrt(1 - 0.006674 * Math.sin(P) * Math.sin(P));
+	return D = Math.sqrt((M * dP) * (M * dP) + (N * Math.cos(P) * dR) * (N * Math.cos(P) * dR));
+}
+
+// 出力リンク生成判定と、標高タイルダウンロード
+async function saveFile(){
+	if (outTrailDat.length === 0 ) return;
+	if ( message.hasChildNodes() ) return;
+	// 標高タイル
+	outEleDat = await makeEleArray();
+	addSaveLink( "message" );
+}
+
+// 標高配列作成
+async function makeEleArray(){
+	document.body.style.cursor = "progress";
+	document.getElementById("mapWin").style.cursor = "progress";
+	let eleArray = [], tDat, eleVal;
+	for ( let i = 0; i < outTrailDat.length; i++ ){
+		const tileDEM5A = latlon2Tile( outTrailDat[i][0], outTrailDat[i][1], 15 );
+		const tileNameDEM5A = `15/${tileDEM5A.tx}/${tileDEM5A.ty}`;
+		const tileDEM10B = latlon2Tile( outTrailDat[i][0], outTrailDat[i][1], 14 );
+		const tileNameDEM10B = `15/${tileDEM10B.tx}/${tileDEM10B.ty}`;
+		if ( ! eleTile.hasOwnProperty( tileNameDEM5A ) &&  ! eleTile.hasOwnProperty( tileNameDEM10B ) ){
+			let url = `https://cyberjapandata.gsi.go.jp/xyz/dem5a_png/15/${tileDEM5A.tx}/${tileDEM5A.ty}.png`;
+			let resp = await getPngTile( url, tileNameDEM5A );
+			if ( resp === "404" ){
+				url = `https://cyberjapandata.gsi.go.jp/xyz/dem_png/14/${tileDEM10B.tx}/${tileDEM10B.ty}.png`;
+				await getPngTile( url, tileNameDEM10B );
+			}
+		}
+		if ( eleTile.hasOwnProperty( tileNameDEM5A ) ){
+			tDat = eleTile[tileNameDEM5A];
+			eleVal = getEleFromTileData( tDat, tileDEM5A.px, tileDEM5A.py );
+		}else{
+			tDat = eleTile[tileNameDEM10B];
+			eleVal = getEleFromTileData( tDat, tileDEM10B.px, tileDEM10B.py );
+		 }
+		if ( eleVal === null ){
+			if ( ! eleTile.hasOwnProperty( tileNameDEM10B ) ) {
+				url = `https://cyberjapandata.gsi.go.jp/xyz/dem_png/14/${tileDEM10B.tx}/${tileDEM10B.ty}.png`;
+				await getPngTile( url, tileNameDEM10B );
+			}
+			eleVal = getEleFromTileData( tDat, tileDEM10B.px, tileDEM10B.py );
+		}
+		eleArray.push( eleVal); 
+	}
+	eleArray = treatmentEle( eleArray );
+	document.body.style.cursor = "default";
+	document.getElementById("mapWin").style.cursor = "crosshair";
+	return eleArray;
+}
+
+// 標高無効値の処理
+function treatmentEle( eleArray ){
+	if ( eleArray[0] < 0 || eleArray[0] === 83886.08 ){
+		let stop = 0, repEle = 0;
+		for ( let i = 1; i < eleArray.length; i++ ){
+			if ( eleArray[i] != eleArray[0] ){
+				repEle = eleArray[i];
+				stop = i;
+				break;
+			}
+		}
+		for ( let i = 0; i < stop; i++ ){ eleArray[i] = repEle; }
+	}
+	let PreEle =  eleArray[0];
+	for ( let i = 1; i < eleArray.length; i++ ){
+		if ( eleArray[i] < 10 || eleArray[i] === 83886.08 ){ eleArray[i] = PreEle; }
+		PreEle = eleArray[i];
+	}
+	return eleArray;
+}
+
+
+// pngタイルから標高値を得る
+function getEleFromTileData(tileData, x, y, width = 256){
+	const index = (y * width + x) * 4;
+	const r = tileData[index];
+	const g = tileData[index + 1];
+	const b = tileData[index + 2];
+	const ele = ( 65536 * r + 256 * g + b ) / 100;
+	if (ele === 8388608) return null; // データなし（海など）無効値(R, G, B)=(128, 0, 0)
+	if (ele < 8388608) return ele; // 標高値
+	return (ele - 16777216); // ele > 2^23は無効値
+}
+
+// 地理院サーバーからpng標高タイルを取得、取得したタイルは eleTile = {} に zoom/tileX/tileY のキーで格納
+async function getPngTile( url, TileName ){
+	const res = await fetch(url);
+	if (!res.ok || !res.headers.get("Content-Type")?.startsWith("image/")) {
+//		console.error(`Failed to load PNG tile: ${url}`);
+		return "404";
+	}
+	const blob = await res.blob();
+	try {
+		const bitmap = await createImageBitmap(blob);
+		const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+		const ctx = canvas.getContext('2d');
+		ctx.drawImage(bitmap, 0, 0);
+		const imgData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+		eleTile[ TileName ] = imgData.data;
+	} catch (err) {
+		console.error(`Image decoding failed: ${err}`);
+	}
+}
+
+// ファイル出力リンク作成
+function addSaveLink(location) {
+	let place = document.getElementById(location);
+	// 保存ボタン
+	let SPN = document.createElement("span");
+	SPN.style = "border: 1px solid #000000; background-color: #dcdcdc";
+	let LinKtxt = document.createTextNode("ファイル名を入力して保存");
+	SPN.appendChild(LinKtxt);
+	let compo = document.createElement("a");
+	compo.setAttribute("id", "saveLocal");
+	compo.setAttribute("href", "javascript:void(0);");
+	compo.setAttribute("onclick", "saveFileAsGpx();");
+	compo.appendChild(SPN);
+	place.appendChild(compo);
+	// キャンセルボタン
+	let cancelBtn = document.createElement("button");
+	cancelBtn.textContent = "キャンセル";
+	cancelBtn.style = "border: 1px solid #000000; background-color: #dcdcdc; margin-left: 10px;";
+	cancelBtn.onclick = function() {
+		place.innerHTML = ""; // locationをクリア
+	};
+	place.appendChild(cancelBtn);
+}
+
+// GPXファイル生成、出力
+function saveFileAsGpx(){
+	if (outTrailDat.length === 0 ) return;
+	let writeFilNam = prompt( "ファイル名" );
+	if (!writeFilNam ) return;
+	let writeTex = '<?xml version="1.0" encoding="UTF-8"?>\n';
+	writeTex += '<gpx version="1.0" creator="https://github.com/guchi999/GPXfromGsiVcector/tree/main" xmlns="http://www.topografix.com/GPX/1/0">\n';
+	writeTex += `<trk>\n<name>${ writeFilNam }</name>\n<trkseg>\n`;
+	let trkptTmp = "";
+	for ( let i = 0; i < outTrailDat.length; i++ ){
+		let trkptTxt = `<trkpt lat="${ outTrailDat[i][0] }" lon="${ outTrailDat[i][1] }">`
+		trkptTxt += `<ele>${ outEleDat[i] }</ele></trkpt>\n`;
+		if ( trkptTmp != trkptTxt ){ // trailENDn と trailBGNn+1 の重なり回避
+			writeTex += trkptTxt;
+		}
+		trkptTmp = trkptTxt;
+	}
+	writeTex += '</trkseg>\n</trk>\n</gpx>\n';
+	let title = writeFilNam + ".gpx"; // 出力ファイル名
+	let linkTag = document.getElementById( "saveLocal" );
+	let linkTagAttr =  ["href","download"];
+	let stringObject = new Blob( [writeTex], { type: "text/plain" } );
+	let objectURL = window.URL.createObjectURL( stringObject );
+	linkTag.setAttribute( linkTagAttr[0], objectURL );
+	linkTag.setAttribute( linkTagAttr[1], title );
+	for ( let i= message.childNodes.length-1; i>=0; i-- ){ message.removeChild(message.childNodes[i]); }
+}
+
+function mapJunp(){
+	let latlonTxt = document.getElementById("mapCenterEntry").value;
+	if ( latlonTxt === "" ) return
+	let latTxt, lonTxt;
+	if ( latlonTxt.indexOf(",") != -1 ){
+		latTxt = latlonTxt.split(",")[0];
+		lonTxt = latlonTxt.split(",")[1];
+	}else{
+		latTxt = latlonTxt.split(" ")[0];
+		lonTxt = latlonTxt.split(" ")[1];
+	}
+	let D1, D2, D3, lat, lon;
+	if ( latlonTxt.indexOf("度") != -1 ){
+		if ( latTxt.indexOf("北緯") != -1 ){
+			D1 = Number( latTxt.substring( latTxt.indexOf("北緯") +2, latTxt.indexOf("度")) );
+		}else{
+			D1 = Number( latTxt.substring( 0, latTxt.indexOf("度")) );
+		}
+		D2 = Number( latTxt.substring( latTxt.indexOf("度") +1, latTxt.indexOf("分")) ) / 60;
+		D3 = Number( latTxt.substring( latTxt.indexOf("分") +1, latTxt.indexOf("秒")) ) / 3600;
+		lat = D1 + D2 + D3;
+		if ( lonTxt.indexOf("東経") != -1 ){
+			D1 = Number( lonTxt.substring( lonTxt.indexOf("東経") +2, lonTxt.indexOf("度")) );
+		}else{
+			D1 = Number( lonTxt.substring( 0, lonTxt.indexOf("度")) );
+		}
+		D2 = Number( lonTxt.substring( lonTxt.indexOf("度") +1, lonTxt.indexOf("分")) ) / 60;
+		D3 = Number( lonTxt.substring( lonTxt.indexOf("分") +1, lonTxt.indexOf("秒")) ) / 3600;
+		lon = D1 + D2 + D3;
+	}else{
+		lat = Number( latTxt ); lon = Number( lonTxt );
+	}
+	mymap.setView( [ lat, lon ], 15 );
+}
+
+</script>
+</body>
+</html>
