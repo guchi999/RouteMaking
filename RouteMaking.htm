@@ -48,7 +48,7 @@
 </head>
 <body>
 	<div style="display: flex; justify-content: space-between; align-items: center; width: 640px;">
- 		<span style="text-align: left;"><b>ルート作成 ver1.0</b></span>
+ 		<span style="text-align: left;"><b>ルート作成 ver1.1</b></span>
 		<div style="text-align: right;">
 			<label for="mapCenterEntry">地図を移動: </label>
  			<input type="text" id="mapCenterEntry" size="30" value="">
@@ -171,7 +171,8 @@ function stopFreeTrail(){
 function trailkClick(e){
 	let lineTitle = e.target.options.title;
 	if ( lineTitle === "outImage" ) return;
-	if ( lineTitle.split('-')[0] === "S" ){
+	if ( lineTitle.startsWith("B") ||  lineTitle.startsWith("G") ){ lineTitle = lineTitle.substr(2); }
+	if ( lineTitle.split('-')[0] === "S" || lineTitle.split('-')[1] === "S"  ){
 		celectCancel( lineTitle );
 	}else{
 		let tileName = lineTitle.split('-')[0];
@@ -323,8 +324,8 @@ function drawTrailLine( trkName, trkLatLon, tColor ){
 	let trailLine;
 	trailLine = L.polyline(trkLatLon, {title:trkName, color: tColor, weight: 5, bubblingMouseEvents: false }).on('click', trailkClick).addTo(mymap);
 	let Spoint = trkLatLon[0], Gpoint = trkLatLon[ trkLatLon.length -1 ];
-	let Smark = L.marker(Spoint, {title:trkName+"S", icon:Sicon }).on('click', trailkClick).addTo(mymap);
-	let Gmark = L.marker(Gpoint, {title:trkName+"G", icon:Gicon }).addTo(mymap).on('click', trailkClick).addTo(mymap);
+	let Smark = L.marker(Spoint, {title:"B-" + trkName, icon:Sicon }).on('click', trailkClick).addTo(mymap);
+	let Gmark = L.marker(Gpoint, {title:"G-" + trkName, icon:Gicon }).addTo(mymap).on('click', trailkClick).addTo(mymap);
 	return [ trailLine, Smark, Gmark ];
 }
 
