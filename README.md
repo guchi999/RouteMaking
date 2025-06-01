@@ -12,10 +12,8 @@ https://maps.gsi.go.jp/development/vt.html
 -----------　改訂履歴　----------
 
 V1.1 2025/06/01
-
 trail始終点のクリックでtrailが選択できない不具合を改善
 
 V1.0 2025/05/13
-
 初版
 
